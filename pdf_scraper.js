@@ -15,7 +15,12 @@ async function checkFillableForms() {
     for (let i = 0; i < pdfUrls.length; i++) {
       console.log(`Working on PDF number ${i + 1} -- URL: ${pdfUrls[i]}`);
       try {
-        const response = await axios.get(pdfUrls[i], { responseType: 'arraybuffer' });
+        const response = await axios.get(pdfUrls[i], {   
+          headers: {
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36'
+        },
+        responseType: 'arraybuffer' 
+      });
         const pdfBuffer = response.data;
         if (response.headers['content-type'] !== 'application/pdf') {
           throw Error('Not a link to a pdf')
