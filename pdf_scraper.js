@@ -104,7 +104,7 @@ async function checkFillableForms() {
         { id: 'modDate', title: 'Last Modified Date' },
         { id: 'daysAppart', title: 'Days between Created and Modified' },
         { id: 'daysSinceLastMod', title: 'Days Since Last Modified' },
-        { id: 'observePointUrls', title: 'ObservePoint URLs' },
+        { id: 'observePointUrls', title: 'URLs PDF Found On' },
         { id: 'note', title: 'Note' },
       ],
     });
