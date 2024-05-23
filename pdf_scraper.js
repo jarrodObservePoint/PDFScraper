@@ -3,9 +3,9 @@ const pdf = require('pdf-parse');
 const createCsvWriter = require('csv-writer').createObjectCsvWriter;
 const fs = require('fs');
 
-const opApiKey = 'c3JmY2pmc283cTZ1bzdoMWd2MzdnOHNyazFrZm1rdW03Mmtrbjk0M3VhZjQ1bTM4anZoZHJnanE1MCYxNjU0OCYxNTUyNjY2MjE2NzI3';
-const opAuditId = 1299831;
-const opRunId = 4468246;
+const opApiKey = '<<api_key>>';
+const opAuditId = <<auditId>>;
+const opRunId = <<runId>>;
 const csvFilePath = './pdfUrls.csv'; // Path to your CSV file that has the PDF URLs to be scanned
 const csvDelimiter = ',';
 
