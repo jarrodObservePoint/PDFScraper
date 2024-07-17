@@ -8,6 +8,7 @@ console.log(`PDF Links:${JSON.stringify(allPdfs)}`)
 
 const axios = require('axios');
 const pdf = require('pdf-parse');
+const crypto = require('crypto');
 const createCsvWriter = require('csv-writer').createObjectCsvWriter;
 const { parse } = require('csv-parse/sync');
 
@@ -44,8 +45,8 @@ async function fetchPdfUrls() {
     const exportStatusResponse = await axios.get(observePointExportStatusUrl, { headers: observePointHeaders });
     const downloadLink = exportStatusResponse.data.exports.filter(e => e.id === exportId)[0].exportDownloadLink;
     await processExport(downloadLink);
-    const urls = await getPDFLinks();
-    return urls
+    const urls = [...new Set(await getPDFLinks())];
+    return urls;
   } catch (error) {
     console.error('Error fetching PDF URLs from ObservePoint:', error.message);
     return [];
@@ -63,13 +64,12 @@ async function processExport(link) {
   exportResults = csvParsed;
 }
 
-
 async function getPDFLinks() {
-  let pdfLinks = new Array();
+  let pdfLinks = [];
   exportResults.forEach(p => {
-    if(p['LOG MESSAGE'].includes('PDF Links:')) {
+    if (p['LOG MESSAGE'].includes('PDF Links:')) {
       let pdfPages = JSON.parse(p['LOG MESSAGE'].split('PDF Links:')[1]);
-      pdfLinks.push.apply(pdfLinks, pdfPages);
+      pdfLinks.push(...pdfPages);
     }
   });
   
@@ -92,8 +92,10 @@ async function checkFillableForms(pdfUrls) {
         if (response.headers['content-type'] !== 'application/pdf') {
           throw Error('Not a link to a pdf');
         }
-        const data = await pdf(pdfBuffer);
 
+        const hash = crypto.createHash('md5').update(pdfBuffer).digest('hex');
+
+        const data = await pdf(pdfBuffer);
         const hasAcrobatForm = data.info.IsAcroFormPresent;
         const hasXFAForm = data.info.IsXFAPresent;
         const pdfFormatVersion = data.info.PDFFormatVersion;
@@ -111,6 +113,7 @@ async function checkFillableForms(pdfUrls) {
         results.push({
           url: pdfUrls[i],
           urlStatus: response.status,
+          hash: hash,
           hasAcrobatForm: hasAcrobatForm,
           hasXFAForm: hasXFAForm,
           hasFillableForm: (hasXFAForm || hasAcrobatForm),
@@ -136,11 +139,22 @@ async function checkFillableForms(pdfUrls) {
       }
     }
 
+    const hashCounts = results.reduce((acc, result) => {
+      acc[result.hash] = (acc[result.hash] || 0) + 1;
+      return acc;
+    }, {});
+
+    results.forEach(result => {
+      result.duplicate = hashCounts[result.hash] > 1 ? 'TRUE' : 'FALSE';
+    });
+
     const csvWriter = createCsvWriter({
       path: 'pdf_results.csv',
       header: [
         { id: 'url', title: 'PDF URL' },
         { id: 'urlStatus', title: 'PDF URL Status' },
+        { id: 'hash', title: 'Unique Hash' },
+        { id: 'duplicate', title: 'Duplicate PDF' },
         { id: 'hasAcrobatForm', title: 'Uses AcroForm' },
         { id: 'hasXFAForm', title: 'Uses XFA Form' },
         { id: 'hasFillableForm', title: 'Has Fillable Form' },
