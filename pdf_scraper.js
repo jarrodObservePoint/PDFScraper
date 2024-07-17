@@ -1,23 +1,66 @@
 const axios = require('axios');
 const pdf = require('pdf-parse');
 const createCsvWriter = require('csv-writer').createObjectCsvWriter;
-const fs = require('fs');
+const { parse } = require('csv-parse/sync');
 
-const opApiKey = '<<api_key>>';
-const opAuditId = <<auditId>>;
-const opRunId = <<runId>>;
-const csvFilePath = './pdfUrls.csv'; // Path to your CSV file that has the PDF URLs to be scanned
-const csvDelimiter = ',';
+const args = process.argv.slice(2);
+if (args.length < 3) {
+  console.error('Please provide opApiKey, opAuditId, and opRunId as command-line arguments');
+  process.exit(1);
+}
 
-const results = [];
-const observePointUrl = `https://api.observepoint.com/v3/web-audits/${opAuditId}/runs/${opRunId}/reports/browser-logs/pages?page=0&size=50`;
+const opApiKey = args[0];
+const opAuditId = args[1];
+const opRunId = args[2];
+const observePointExportUrl = `https://api.observepoint.com/v3/web-audits/${opAuditId}/runs/${opRunId}/exports/browser_logs_page_logs?allData=true`;
+const observePointExportStatusUrl = `https://api.observepoint.com/v3/exports?page=0&size=100&sortBy=date_exported&sortDesc=true`;
 const observePointHeaders = {
   'Content-Type': 'application/json',
   'Authorization': `api_key ${opApiKey}`
 };
 
-async function checkFillableForms() {
-  let pdfUrls = await getUrls(csvFilePath, csvDelimiter);
+const results = [];
+
+async function fetchPdfUrls() {
+  try {
+    const exportResponse = await axios.post(observePointExportUrl, null, { headers: observePointHeaders });
+    const exportId = exportResponse.data.id;
+    let exportStatus;
+    do {
+      await new Promise(resolve => setTimeout(resolve, 5000));
+      const exportStatusResponse = await axios.get(observePointExportStatusUrl, { headers: observePointHeaders });
+      exportStatus = exportStatusResponse.data.exports.filter(e => e.id === exportId)[0].exportStatus;
+    } while (exportStatus !== 'completed');
+    const exportStatusResponse = await axios.get(observePointExportStatusUrl, { headers: observePointHeaders });
+    const downloadLink = exportStatusResponse.data.exports.filter(e => e.id === exportId)[0].exportDownloadLink;
+    const urls = await getPDFLinks(downloadLink);
+    return urls
+  } catch (error) {
+    console.error('Error fetching PDF URLs from ObservePoint:', error.message);
+    return [];
+  }
+}
+
+async function getPDFLinks(link) {
+  const response = await axios.get(link);
+  const csvData = response.data;
+  const csvParsed = parse(csvData, {
+    columns: true,
+    skip_empty_lines: true
+  });
+
+  let pdfLinks = new Array();
+  csvParsed.forEach(p => {
+    if(p['LOG MESSAGE'].includes('PDF Links:')) {
+      let pdfPages = JSON.parse(p['LOG MESSAGE'].split('PDF Links:')[1]);
+      pdfLinks.push.apply(pdfLinks, pdfPages);
+    }
+  });
+  
+  return pdfLinks;
+}
+
+async function checkFillableForms(pdfUrls) {
   console.log(`Number of PDFs to Scan: ${pdfUrls.length}`);
   try {
     for (let i = 0; i < pdfUrls.length; i++) {
@@ -48,8 +91,6 @@ async function checkFillableForms() {
         const daysAppart = parseInt((new Date(modDate) - new Date(creationDate)) / 1000 / 60 / 60 / 24);
         const daysSinceLastMod = parseInt((new Date() - new Date(modDate)) / 1000 / 60 / 60 / 24);
 
-        const pdfUrlsFromObservePoint = await getPdfUrlsFromObservePoint(pdfUrls[i]);
-
         results.push({
           url: pdfUrls[i],
           urlStatus: response.status,
@@ -66,23 +107,14 @@ async function checkFillableForms() {
           modDate: modDate,
           daysAppart: daysAppart,
           daysSinceLastMod: daysSinceLastMod,
-          observePointUrls: pdfUrlsFromObservePoint.join('\n'),
           note: '',
         });
       } catch (error) {
-        if (error.message === 'Not a link to a pdf') {
-          results.push({
-            url: pdfUrls[i],
-            urlStatus: 'n/a',
-            note: error.message,
-          });
-        } else {
-          results.push({
-            url: pdfUrls[i],
-            urlStatus: error.response ? error.response.status : 'Error',
-            note: error.message,
-          });
-        }
+        results.push({
+          url: pdfUrls[i],
+          urlStatus: error.response ? error.response.status : 'Error',
+          note: error.message,
+        });
       }
     }
 
@@ -104,7 +136,6 @@ async function checkFillableForms() {
         { id: 'modDate', title: 'Last Modified Date' },
         { id: 'daysAppart', title: 'Days between Created and Modified' },
         { id: 'daysSinceLastMod', title: 'Days Since Last Modified' },
-        { id: 'observePointUrls', title: 'URLs PDF Found On' },
         { id: 'note', title: 'Note' },
       ],
     });
@@ -123,35 +154,11 @@ async function checkFillableForms() {
 
     return `${year}-${month}-${day}`;
   }
-
-  async function getUrls(csvFilePath, csvDelimiter) {
-    try {
-      const data = fs.readFileSync(csvFilePath, 'utf8');
-      const lines = data.trim().split('\n');
-      const urls = lines.slice(1).map(line => line.split(csvDelimiter)[0].trim());
-      const pdfUrls = [...new Set(urls)];
-      return pdfUrls;
-    } catch (err) {
-      console.error('Error reading CSV file:', err);
-      return [];
-    }
-  }
-
-  async function getPdfUrlsFromObservePoint(pdfUrl) {
-    try {
-      const response = await axios.post(observePointUrl, {
-        messageText: {
-          filterType: 'contains',
-          filterValue: pdfUrl
-        }
-      }, { headers: observePointHeaders });
-      const urls = response.data.pages.map(item => item.pageUrl);
-      return urls;
-    } catch (error) {
-      console.error(`Error fetching ObservePoint URLs for ${pdfUrl}:`, error.message);
-      return [];
-    }
-  }
 }
 
-checkFillableForms();
+async function main() {
+  const pdfUrls = await fetchPdfUrls();
+  await checkFillableForms(pdfUrls);
+}
+
+main();
