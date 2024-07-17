@@ -12,6 +12,7 @@ if (args.length < 3) {
 const opApiKey = args[0];
 const opAuditId = args[1];
 const opRunId = args[2];
+const observePointConsoleUrl = `https://api.observepoint.com/v3/web-audits/${opAuditId}/runs/${opRunId}/reports/browser-logs/pages?page=0&size=50`;
 const observePointExportUrl = `https://api.observepoint.com/v3/web-audits/${opAuditId}/runs/${opRunId}/exports/browser_logs_page_logs?allData=true`;
 const observePointExportStatusUrl = `https://api.observepoint.com/v3/exports?page=0&size=100&sortBy=date_exported&sortDesc=true`;
 const observePointHeaders = {
@@ -20,6 +21,7 @@ const observePointHeaders = {
 };
 
 const results = [];
+let exportResults;
 
 async function fetchPdfUrls() {
   try {
@@ -33,7 +35,8 @@ async function fetchPdfUrls() {
     } while (exportStatus !== 'completed');
     const exportStatusResponse = await axios.get(observePointExportStatusUrl, { headers: observePointHeaders });
     const downloadLink = exportStatusResponse.data.exports.filter(e => e.id === exportId)[0].exportDownloadLink;
-    const urls = await getPDFLinks(downloadLink);
+    await processExport(downloadLink);
+    const urls = await getPDFLinks();
     return urls
   } catch (error) {
     console.error('Error fetching PDF URLs from ObservePoint:', error.message);
@@ -41,16 +44,21 @@ async function fetchPdfUrls() {
   }
 }
 
-async function getPDFLinks(link) {
+async function processExport(link) {
   const response = await axios.get(link);
   const csvData = response.data;
   const csvParsed = parse(csvData, {
     columns: true,
     skip_empty_lines: true
   });
+  
+  exportResults = csvParsed;
+}
 
+
+async function getPDFLinks() {
   let pdfLinks = new Array();
-  csvParsed.forEach(p => {
+  exportResults.forEach(p => {
     if(p['LOG MESSAGE'].includes('PDF Links:')) {
       let pdfPages = JSON.parse(p['LOG MESSAGE'].split('PDF Links:')[1]);
       pdfLinks.push.apply(pdfLinks, pdfPages);
@@ -90,6 +98,7 @@ async function checkFillableForms(pdfUrls) {
         const modDate = dateParser(data.info.ModDate);
         const daysAppart = parseInt((new Date(modDate) - new Date(creationDate)) / 1000 / 60 / 60 / 24);
         const daysSinceLastMod = parseInt((new Date() - new Date(modDate)) / 1000 / 60 / 60 / 24);
+        const pdfUrlsFromObservePoint = await getPdfUrlsFromObservePoint(pdfUrls[i]);
 
         results.push({
           url: pdfUrls[i],
@@ -107,6 +116,7 @@ async function checkFillableForms(pdfUrls) {
           modDate: modDate,
           daysAppart: daysAppart,
           daysSinceLastMod: daysSinceLastMod,
+          observePointUrls: pdfUrlsFromObservePoint.join('\n'),
           note: '',
         });
       } catch (error) {
@@ -121,8 +131,8 @@ async function checkFillableForms(pdfUrls) {
     const csvWriter = createCsvWriter({
       path: 'pdf_results.csv',
       header: [
-        { id: 'url', title: 'URL' },
-        { id: 'urlStatus', title: 'URL Status' },
+        { id: 'url', title: 'PDF URL' },
+        { id: 'urlStatus', title: 'PDF URL Status' },
         { id: 'hasAcrobatForm', title: 'Uses AcroForm' },
         { id: 'hasXFAForm', title: 'Uses XFA Form' },
         { id: 'hasFillableForm', title: 'Has Fillable Form' },
@@ -136,6 +146,7 @@ async function checkFillableForms(pdfUrls) {
         { id: 'modDate', title: 'Last Modified Date' },
         { id: 'daysAppart', title: 'Days between Created and Modified' },
         { id: 'daysSinceLastMod', title: 'Days Since Last Modified' },
+        { id: 'observePointUrls', title: 'URLs Where PDF Found' },
         { id: 'note', title: 'Note' },
       ],
     });
@@ -153,6 +164,16 @@ async function checkFillableForms(pdfUrls) {
     let day = dateCleaned.substring(6, 8);
 
     return `${year}-${month}-${day}`;
+  }
+
+  async function getPdfUrlsFromObservePoint(pdfUrl) {
+    try {
+      let urls = exportResults.filter(r => r['LOG MESSAGE'].includes(pdfUrl)).map(e => {return e['INITIAL PAGE URL']});
+      return urls;
+    } catch (error) {
+      console.error(`Error fetching ObservePoint URLs for ${pdfUrl}:`, error.message);
+      return [];
+    }
   }
 }
 
