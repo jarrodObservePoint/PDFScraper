@@ -1,3 +1,11 @@
+/*
+Example On-page Action code to place in an ObservePoint audit to collect links to PDFs on all pages scanned.
+
+let allPdfs = [].slice.call(document.querySelectorAll('a[src*="pdf"],a[href*="pdf"]')).map(e => {return e.href});
+console.log(`PDF Links:${JSON.stringify(allPdfs)}`)
+ */
+
+
 const axios = require('axios');
 const pdf = require('pdf-parse');
 const createCsvWriter = require('csv-writer').createObjectCsvWriter;
