@@ -44,7 +44,7 @@ Download and save to your machine the most recent version of [the script](https:
 Using the terminal on your machine, [navigate to the directory where you have saved the script](https://tutorials.codebar.io/command-line/introduction/tutorial.html#:~:text=The%20cd%20command%20allows%20you,command%20is%20cd%20your%2Ddirectory%20.&text=Now%20that%20we%20moved%20to,again%2C%20then%20cd%20into%20it.).
 You can now run the script. An example of that execution from the terminal will look like the following:
 ```sh
-node  node pdf_scraper.js [OberservePoint API Key] [Audit ID] [Run ID]
+node pdf_scraper.js [OberservePoint API Key] [Audit ID] [Run ID]
 ```
 You can get your ObservePoint API Key by navigating to https://app.observepoint.com/my-profile.
 For the Audit ID and Run ID, after running your audit instructed in the pre-requirements, navigate to that finished audit and use the URL to gather those IDs which have them in the following format:
