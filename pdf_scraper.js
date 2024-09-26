@@ -1,34 +1,3 @@
-/*
-Example On-page Action code to place in an ObservePoint audit to collect links to PDFs on all pages scanned.
-
-let allPdfs = [].slice.call(document.querySelectorAll('a[src*="pdf"],a[href*="pdf"]')).map(e => e.href);
-let logString = 'PDF Links:';
-let output = [], outputLength = logString.length + 2;
-
-allPdfs.forEach((p, index) => {
-    let tempOutputString = JSON.stringify(p);
-    let tempOutputLength = tempOutputString.length;
-
-    if (outputLength + tempOutputLength + 1 > 2000) {
-        console.log(`${logString}${JSON.stringify(output)}`);
-        output = [p];
-        outputLength = logString.length + tempOutputLength + 2;
-    } else {
-        output.push(p);
-        outputLength += tempOutputLength + 1;
-    }
-
-    if (index + 1 === allPdfs.length) {
-        console.log(`${logString}${JSON.stringify(output)}`);
-    }
-});
-
-
-you'll need to run the following npm before first use:
-npm install axios pdf-parse csv-writer csv-parse crypto
- */
-
-
 const axios = require('axios');
 const pdf = require('pdf-parse');
 const crypto = require('crypto');
