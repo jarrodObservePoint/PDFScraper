@@ -135,3 +135,6 @@ dist
 pdf_results.csv
 pdfUrls.csv
 test_combined.js
+package-lock.json
+package.json
+test.js
