@@ -1,8 +1,31 @@
 /*
 Example On-page Action code to place in an ObservePoint audit to collect links to PDFs on all pages scanned.
 
-let allPdfs = [].slice.call(document.querySelectorAll('a[src*="pdf"],a[href*="pdf"]')).map(e => {return e.href});
-console.log(`PDF Links:${JSON.stringify(allPdfs)}`)
+let allPdfs = [].slice.call(document.querySelectorAll('a[src*="pdf"],a[href*="pdf"]')).map(e => e.href);
+let logString = 'PDF Links:';
+let output = [], outputLength = logString.length + 2;
+
+allPdfs.forEach((p, index) => {
+    let tempOutputString = JSON.stringify(p);
+    let tempOutputLength = tempOutputString.length;
+
+    if (outputLength + tempOutputLength + 1 > 2000) {
+        console.log(`${logString}${JSON.stringify(output)}`);
+        output = [p];
+        outputLength = logString.length + tempOutputLength + 2;
+    } else {
+        output.push(p);
+        outputLength += tempOutputLength + 1;
+    }
+
+    if (index + 1 === allPdfs.length) {
+        console.log(`${logString}${JSON.stringify(output)}`);
+    }
+});
+
+
+you'll need to run the following npm before first use:
+npm install axios pdf-parse csv-writer csv-parse crypto
  */
 
 
@@ -21,7 +44,6 @@ if (args.length < 3) {
 const opApiKey = args[0];
 const opAuditId = args[1];
 const opRunId = args[2];
-const observePointConsoleUrl = `https://api.observepoint.com/v3/web-audits/${opAuditId}/runs/${opRunId}/reports/browser-logs/pages?page=0&size=50`;
 const observePointExportUrl = `https://api.observepoint.com/v3/web-audits/${opAuditId}/runs/${opRunId}/exports/browser_logs_page_logs?allData=true`;
 const observePointExportStatusUrl = `https://api.observepoint.com/v3/exports?page=0&size=100&sortBy=date_exported&sortDesc=true`;
 const observePointHeaders = {
@@ -89,8 +111,8 @@ async function checkFillableForms(pdfUrls) {
           responseType: 'arraybuffer'
         });
         const pdfBuffer = response.data;
-        if (response.headers['content-type'] !== 'application/pdf') {
-          throw Error('Not a link to a pdf');
+        if (response.headers['content-type'] !== 'application/pdf' && response.headers['content-type'] !== 'application/octet-stream') {
+          throw Error(`Not a link to a pdf. File type is ${response.headers['content-type']}`);
         }
 
         const hash = crypto.createHash('md5').update(pdfBuffer).digest('hex');
