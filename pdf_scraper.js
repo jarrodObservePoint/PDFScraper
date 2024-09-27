@@ -72,6 +72,7 @@ async function checkFillableForms(pdfUrls) {
   try {
     for (let i = 0; i < pdfUrls.length; i++) {
       console.log(`Working on PDF number ${i + 1} -- URL: ${pdfUrls[i]}`);
+      errorPass = pdfUrls[i];
       try {
         const response = await axios.get(pdfUrls[i], {
           headers: {
@@ -122,9 +123,11 @@ async function checkFillableForms(pdfUrls) {
           note: '',
         });
       } catch (error) {
+        const pdfUrlsFromObservePoint = await getPdfUrlsFromObservePoint(pdfUrls[i]);
         results.push({
           url: pdfUrls[i],
           urlStatus: error.response ? error.response.status : 'Error',
+          observePointUrls: pdfUrlsFromObservePoint.join('\n'),
           note: error.message,
         });
       }
@@ -191,7 +194,7 @@ async function checkFillableForms(pdfUrls) {
 }
 
 async function main() {
-  const pdfUrls = await fetchPdfUrls();
+  let pdfUrls = await fetchPdfUrls();
   await checkFillableForms(pdfUrls);
 }
 
