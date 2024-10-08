@@ -237,7 +237,6 @@ async function checkFillableForms(pdfUrls) {
 
 async function main() {
   let pdfUrls = await fetchPdfUrls();
-  pdfUrls = ["https://www.ptglab.com/products/pictures/pdf/19677-1-AP.pdf"];
   await checkFillableForms(pdfUrls);
 }
 
