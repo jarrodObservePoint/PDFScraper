@@ -211,6 +211,7 @@ async function fetchPdf(url, index) {
     const daysSinceLastMod = parseInt(
       (new Date() - new Date(modDate)) / 1000 / 60 / 60 / 24
     );
+    const pdfUrlsFromObservePoint = await getPdfUrlsFromObservePoint(url);
 
     return {
       url: url,
@@ -229,15 +230,16 @@ async function fetchPdf(url, index) {
       modDate: modDate,
       daysAppart: daysAppart,
       daysSinceLastMod: daysSinceLastMod,
-      observePointUrls: "",
+      observePointUrls: pdfUrlsFromObservePoint.join("\n"),
       note: "",
     };
   } catch (error) {
     console.error(`Error fetching PDF ${index + 1}: ${url}`, error.message);
+    const pdfUrlsFromObservePoint = await getPdfUrlsFromObservePoint(url);
     return {
       url: url,
       urlStatus: error.response ? error.response.status : "Error",
-      hash: "",
+      observePointUrls: pdfUrlsFromObservePoint.join("\n"),
       note: error.message,
     };
   }
@@ -253,6 +255,23 @@ function dateParser(date) {
   let day = dateCleaned.substring(6, 8);
 
   return `${year}-${month}-${day}`;
+}
+
+async function getPdfUrlsFromObservePoint(pdfUrl) {
+  try {
+    let urls = exportResults
+      .filter((r) => r["LOG MESSAGE"].includes(pdfUrl))
+      .map((e) => {
+        return e["INITIAL PAGE URL"];
+      });
+    return urls;
+  } catch (error) {
+    console.error(
+      `Error fetching ObservePoint URLs for ${pdfUrl}:`,
+      error.message
+    );
+    return [];
+  }
 }
 
 async function main() {
