@@ -11,7 +11,7 @@ This tool enables you to gather metadata associated with PDFs accross your site 
 
 ```js
 let allPdfs = [].slice
-  .call(document.querySelectorAll('a[src*="pdf" i],a[href*="pdf" i]'))
+  .call(document.querySelectorAll('[src*="pdf" i],[href*="pdf" i]'))
   .map((e) => e.href);
 let logString = "PDF Links:";
 let output = [],
