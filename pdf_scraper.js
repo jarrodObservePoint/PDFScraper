@@ -3,6 +3,8 @@ const pdf = require("pdf-parse");
 const crypto = require("crypto");
 const createCsvWriter = require("csv-writer").createObjectCsvWriter;
 const { parse } = require("csv-parse/sync");
+const fs = require("fs");
+const path = require("path");
 
 const args = process.argv.slice(2);
 if (args.length < 3) {
@@ -15,6 +17,18 @@ if (args.length < 3) {
 const opApiKey = args[0];
 const opAuditId = args[1];
 const opRunId = args[2];
+let requestsPerSecond = 4;
+
+const requestsPerSecondArg = args.find((arg) =>
+  arg.startsWith("--requestsPerSecond=")
+);
+if (requestsPerSecondArg) {
+  const value = parseInt(requestsPerSecondArg.split("=")[1]);
+  if (!isNaN(value) && value > 0) {
+    requestsPerSecond = value;
+  }
+}
+
 const observePointExportUrl = `https://api.observepoint.com/v3/web-audits/${opAuditId}/runs/${opRunId}/exports/browser_logs_page_logs?allData=true`;
 const observePointExportStatusUrl = `https://api.observepoint.com/v3/exports?page=0&size=100&sortBy=date_exported&sortDesc=true`;
 const observePointHeaders = {
@@ -24,6 +38,10 @@ const observePointHeaders = {
 
 const results = [];
 let exportResults;
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 async function fetchPdfUrls() {
   try {
@@ -83,90 +101,20 @@ async function getPDFLinks() {
 async function checkFillableForms(pdfUrls) {
   console.log(`Number of PDFs to Scan: ${pdfUrls.length}`);
   try {
-    for (let i = 0; i < pdfUrls.length; i++) {
-      console.log(`Working on PDF number ${i + 1} -- URL: ${pdfUrls[i]}`);
-      errorPass = pdfUrls[i];
-      try {
-        const response = await axios.get(pdfUrls[i], {
-          headers: {
-            "User-Agent":
-              "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
-          },
-          responseType: "arraybuffer",
-        });
-        const pdfBuffer = response.data;
-        if (
-          response.headers["content-type"] !== "application/pdf" &&
-          response.headers["content-type"] !== "application/octet-stream"
-        ) {
-          throw Error(
-            `Not a link to a pdf. File type is ${response.headers["content-type"]}`
-          );
-        }
+    const results = [];
+    const tasks = pdfUrls.map(async (url, index) => {
+      await delay((1000 / requestsPerSecond) * index);
+      return fetchPdf(url, index);
+    });
 
-        const hash = crypto.createHash("md5").update(pdfBuffer).digest("hex");
+    const fetchedResults = await Promise.all(tasks);
 
-        const data = await pdf(pdfBuffer);
-        const hasAcrobatForm = data.info.IsAcroFormPresent;
-        const hasXFAForm = data.info.IsXFAPresent;
-        const pdfFormatVersion = data.info.PDFFormatVersion;
-        const pdfSize =
-          Math.round((response.data.length / 1000000) * 100) / 100;
-        const creator = data.info.Creator;
-        const producer = data.info.Producer;
-        const totalPages = data.numpages;
-        const renderedPages = data.numrender;
-        const creationDate = data.info.CreationDate
-          ? dateParser(data.info.CreationDate)
-          : "No Creation Date Available";
-        const modDate = data.info.ModDate
-          ? dateParser(data.info.ModDate)
-          : "No Modification Date Available";
-        const daysAppart = parseInt(
-          (new Date(modDate) - new Date(creationDate)) / 1000 / 60 / 60 / 24
-        );
-        const daysSinceLastMod = parseInt(
-          (new Date() - new Date(modDate)) / 1000 / 60 / 60 / 24
-        );
-        const pdfUrlsFromObservePoint = await getPdfUrlsFromObservePoint(
-          pdfUrls[i]
-        );
-
-        results.push({
-          url: pdfUrls[i],
-          urlStatus: response.status,
-          hash: hash,
-          hasAcrobatForm: hasAcrobatForm,
-          hasXFAForm: hasXFAForm,
-          hasFillableForm: hasXFAForm || hasAcrobatForm,
-          pdfFormatVersion: pdfFormatVersion,
-          pdfSize: pdfSize,
-          creator: creator,
-          producer: producer,
-          totalPages: totalPages,
-          renderedPages: renderedPages,
-          creationDate: creationDate,
-          modDate: modDate,
-          daysAppart: daysAppart,
-          daysSinceLastMod: daysSinceLastMod,
-          observePointUrls: pdfUrlsFromObservePoint.join("\n"),
-          note: "",
-        });
-      } catch (error) {
-        const pdfUrlsFromObservePoint = await getPdfUrlsFromObservePoint(
-          pdfUrls[i]
-        );
-        results.push({
-          url: pdfUrls[i],
-          urlStatus: error.response ? error.response.status : "Error",
-          observePointUrls: pdfUrlsFromObservePoint.join("\n"),
-          note: error.message,
-        });
-      }
-    }
+    fetchedResults.forEach((result) => results.push(result));
 
     const hashCounts = results.reduce((acc, result) => {
-      acc[result.hash] = (acc[result.hash] || 0) + 1;
+      if (result.hash) {
+        acc[result.hash] = (acc[result.hash] || 0) + 1;
+      }
       return acc;
     }, {});
 
@@ -174,8 +122,22 @@ async function checkFillableForms(pdfUrls) {
       result.duplicate = hashCounts[result.hash] > 1 ? "TRUE" : "FALSE";
     });
 
+    const resultsDir = path.join(__dirname, "Results");
+    if (!fs.existsSync(resultsDir)) {
+      fs.mkdirSync(resultsDir);
+    }
+
+    const now = new Date();
+    const fileName = `pdf_results_${now.getFullYear()}_${(now.getMonth() + 1)
+      .toString()
+      .padStart(2, "0")}_${now.getDate().toString().padStart(2, "0")}_${now
+      .getHours()
+      .toString()
+      .padStart(2, "0")}_${now.getMinutes().toString().padStart(2, "0")}.csv`;
+    const filePath = path.join(resultsDir, fileName);
+
     const csvWriter = createCsvWriter({
-      path: "pdf_results.csv",
+      path: filePath,
       header: [
         { id: "url", title: "PDF URL" },
         { id: "urlStatus", title: "PDF URL Status" },
@@ -200,39 +162,97 @@ async function checkFillableForms(pdfUrls) {
     });
 
     await csvWriter.writeRecords(results);
-    console.log("Results saved to pdf_results.csv");
+    console.log(`Results saved to ${filePath}`);
   } catch (error) {
     console.error("Unhandled promise rejection:", error);
   }
+}
 
-  function dateParser(date) {
-    let dateCleaned =
-      date.split(":").length > 1
-        ? date.split(":")[1].substring(0, 8)
-        : date.split(":")[0].substring(0, 8);
-    let year = dateCleaned.substring(0, 4);
-    let month = dateCleaned.substring(4, 6);
-    let day = dateCleaned.substring(6, 8);
-
-    return `${year}-${month}-${day}`;
-  }
-
-  async function getPdfUrlsFromObservePoint(pdfUrl) {
-    try {
-      let urls = exportResults
-        .filter((r) => r["LOG MESSAGE"].includes(pdfUrl))
-        .map((e) => {
-          return e["INITIAL PAGE URL"];
-        });
-      return urls;
-    } catch (error) {
-      console.error(
-        `Error fetching ObservePoint URLs for ${pdfUrl}:`,
-        error.message
+async function fetchPdf(url, index) {
+  try {
+    console.log(`Fetching PDF ${index + 1}: ${url}`);
+    const response = await axios.get(url, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+      },
+      responseType: "arraybuffer",
+    });
+    const pdfBuffer = response.data;
+    if (
+      !response.headers["content-type"].includes("application/pdf") &&
+      !response.headers["content-type"].includes("application/octet-stream")
+    ) {
+      throw Error(
+        `Not a link to a pdf. File type is ${response.headers["content-type"]}`
       );
-      return [];
     }
+
+    const hash = crypto.createHash("md5").update(pdfBuffer).digest("hex");
+
+    const data = await pdf(pdfBuffer);
+    const hasAcrobatForm = data.info.IsAcroFormPresent;
+    const hasXFAForm = data.info.IsXFAPresent;
+    const pdfFormatVersion = data.info.PDFFormatVersion;
+    const pdfSize = Math.round((response.data.length / 1000000) * 100) / 100;
+    const creator = data.info.Creator;
+    const producer = data.info.Producer;
+    const totalPages = data.numpages;
+    const renderedPages = data.numrender;
+    const creationDate = data.info.CreationDate
+      ? dateParser(data.info.CreationDate)
+      : "No Creation Date Available";
+    const modDate = data.info.ModDate
+      ? dateParser(data.info.ModDate)
+      : "No Modification Date Available";
+    const daysAppart = parseInt(
+      (new Date(modDate) - new Date(creationDate)) / 1000 / 60 / 60 / 24
+    );
+    const daysSinceLastMod = parseInt(
+      (new Date() - new Date(modDate)) / 1000 / 60 / 60 / 24
+    );
+
+    return {
+      url: url,
+      urlStatus: response.status,
+      hash: hash || "",
+      hasAcrobatForm: hasAcrobatForm,
+      hasXFAForm: hasXFAForm,
+      hasFillableForm: hasXFAForm || hasAcrobatForm,
+      pdfFormatVersion: pdfFormatVersion,
+      pdfSize: pdfSize,
+      creator: creator,
+      producer: producer,
+      totalPages: totalPages,
+      renderedPages: renderedPages,
+      creationDate: creationDate,
+      modDate: modDate,
+      daysAppart: daysAppart,
+      daysSinceLastMod: daysSinceLastMod,
+      observePointUrls: "",
+      note: "",
+    };
+  } catch (error) {
+    console.error(`Error fetching PDF ${index + 1}: ${url}`, error.message);
+    return {
+      url: url,
+      urlStatus: error.response ? error.response.status : "Error",
+      hash: "",
+      note: error.message,
+    };
   }
+}
+
+function dateParser(date) {
+  let dateCleaned =
+    date.split(":").length > 1
+      ? date.split(":")[1].substring(0, 8)
+      : date.split(":")[0].substring(0, 8);
+  let year = dateCleaned.substring(0, 4);
+  let month = dateCleaned.substring(4, 6);
+  let day = dateCleaned.substring(6, 8);
+
+  return `${year}-${month}-${day}`;
 }
 
 async function main() {
