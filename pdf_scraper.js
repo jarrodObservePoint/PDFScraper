@@ -81,6 +81,7 @@ async function processExport(link) {
   const csvParsed = parse(csvData, {
     columns: true,
     skip_empty_lines: true,
+    skip_records_with_error: true,
   });
 
   exportResults = csvParsed;
@@ -90,8 +91,10 @@ async function getPDFLinks() {
   let pdfLinks = [];
   exportResults.forEach((p) => {
     if (p["LOG MESSAGE"].includes("PDF Links:")) {
-      let pdfPages = JSON.parse(p["LOG MESSAGE"].split("PDF Links:")[1]);
-      pdfLinks.push(...pdfPages);
+      try {
+        let pdfPages = JSON.parse(p["LOG MESSAGE"].split("PDF Links:")[1]);
+        pdfLinks.push(...pdfPages);
+      } catch (error) {}
     }
   });
 
