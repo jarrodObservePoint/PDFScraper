@@ -56,6 +56,11 @@ You can now run the script. An example of that execution from the terminal will 
 node pdf_scraper.js [OberservePoint API Key] [Audit ID] [Run ID]
 ```
 
+> **_NOTE:_**
+> If you would like to increase or reduce the rate at which PDFs are scanned, you can use the optional flag of --requestsPerSecond (default is 4)
+> Example: node pdf_scraper.js [OberservePoint API Key] [Audit ID] [Run ID] --requestsPerSecond=2
+> The above would reduce the scanning from 4 per second to 2 per second.
+
 You can get your ObservePoint API Key by navigating to https://app.observepoint.com/my-profile.
 For the Audit ID and Run ID, after running your audit instructed in the pre-requirements, navigate to that finished audit and use the URL to gather those IDs which have them in the following format:
 
