@@ -7,16 +7,15 @@ const fs = require("fs");
 const path = require("path");
 
 const args = process.argv.slice(2);
-if (args.length < 3) {
+if (args.length < 2) {
   console.error(
-    "Please provide opApiKey, opAuditId, and opRunId as command-line arguments"
+    "Please provide opApiKey and reportId as command-line arguments"
   );
   process.exit(1);
 }
 
 const opApiKey = args[0];
-const opAuditId = args[1];
-const opRunId = args[2];
+const reportId = args[1];
 let requestsPerSecond = 4;
 
 const requestsPerSecondArg = args.find((arg) =>
@@ -29,15 +28,13 @@ if (requestsPerSecondArg) {
   }
 }
 
-const observePointExportUrl = `https://api.observepoint.com/v3/web-audits/${opAuditId}/runs/${opRunId}/exports/browser_logs_page_logs?allData=true`;
-const observePointExportStatusUrl = `https://api.observepoint.com/v3/exports?page=0&size=100&sortBy=date_exported&sortDesc=true`;
 const observePointHeaders = {
   "Content-Type": "application/json",
-  Authorization: `api_key ${opApiKey}`,
+  Authorization: opApiKey,
 };
 
-const results = [];
-let exportResults;
+const savedReportUrl = `https://api.observepoint.com/v3/reports/grid/saved/${reportId}`;
+const gridBaseUrl = `https://api.observepoint.com/v3/reports/grid`;
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -45,60 +42,78 @@ function delay(ms) {
 
 async function fetchPdfUrls() {
   try {
-    const exportResponse = await axios.post(observePointExportUrl, null, {
-      headers: observePointHeaders,
-    });
-    const exportId = exportResponse.data.id;
-    let exportStatus;
-    do {
-      await new Promise((resolve) => setTimeout(resolve, 5000));
-      const exportStatusResponse = await axios.get(
-        observePointExportStatusUrl,
-        { headers: observePointHeaders }
-      );
-      exportStatus = exportStatusResponse.data.exports.filter(
-        (e) => e.id === exportId
-      )[0].exportStatus;
-    } while (exportStatus !== "completed");
-    const exportStatusResponse = await axios.get(observePointExportStatusUrl, {
-      headers: observePointHeaders,
-    });
-    const downloadLink = exportStatusResponse.data.exports.filter(
-      (e) => e.id === exportId
-    )[0].exportDownloadLink;
-    await processExport(downloadLink);
-    const urls = [...new Set(await getPDFLinks())];
-    return urls;
+    const savedResp = await axios.get(savedReportUrl, { headers: observePointHeaders });
+    const gridEntityTypeUnderscored = savedResp.data.gridEntityType;
+    const queryDefinition = savedResp.data.queryDefinition || {};
+
+    const gridEntityType = String(gridEntityTypeUnderscored || "").replace(/_/g, "-");
+    if (!gridEntityType) throw new Error("Saved report did not include gridEntityType");
+    const gridEndpoint = `${gridBaseUrl}/${gridEntityType}`;
+
+    const pageSize = queryDefinition.size && Number.isInteger(queryDefinition.size) ? queryDefinition.size : 500;
+
+    let page = 0;
+    const urls = new Set();
+    let totalCount = Infinity;
+
+    let linkColIndex = 0;
+
+    while (urls.size < totalCount) {
+      const body = {
+        ...queryDefinition,
+        page,
+        size: pageSize,
+      };
+
+      const resp = await axios.post(gridEndpoint, body, { headers: observePointHeaders });
+
+      const pagination = resp.data && resp.data.metadata && resp.data.metadata.pagination ? resp.data.metadata.pagination : null;
+      if (pagination) {
+        totalCount = pagination.totalCount;
+      } else {
+        totalCount = 0;
+      }
+
+      if (resp.data && resp.data.metadata && Array.isArray(resp.data.metadata.headers)) {
+        const headers = resp.data.metadata.headers;
+        const maybeIndex = headers.findIndex(h => h && h.column && h.column.columnId === "LINK_URL");
+        linkColIndex = maybeIndex >= 0 ? maybeIndex : 0;
+      }
+
+      if (resp.data && Array.isArray(resp.data.rows)) {
+        for (const row of resp.data.rows) {
+          const raw = Array.isArray(row) ? row[linkColIndex] : undefined;
+          if (typeof raw === "string" && raw.length > 0) {
+            urls.add(unwrapSafeLinks(raw));
+          }
+        }
+      }
+
+      if (!pagination || (pagination.currentPageNumber + 1) >= pagination.totalPageCount) {
+        break;
+      }
+
+      page += 1;
+    }
+
+    return Array.from(urls);
   } catch (error) {
-    console.error("Error fetching PDF URLs from ObservePoint:", error.message);
+    console.error("Error fetching PDF URLs from Saved Report:", error.message);
     return [];
   }
 }
 
-async function processExport(link) {
-  const response = await axios.get(link);
-  const csvData = response.data;
-  const csvParsed = parse(csvData, {
-    columns: true,
-    skip_empty_lines: true,
-    skip_records_with_error: true,
-  });
-
-  exportResults = csvParsed;
-}
-
-async function getPDFLinks() {
-  let pdfLinks = [];
-  exportResults.forEach((p) => {
-    if (p["LOG MESSAGE"].includes("PDF Links:")) {
-      try {
-        let pdfPages = JSON.parse(p["LOG MESSAGE"].split("PDF Links:")[1]);
-        pdfLinks.push(...pdfPages);
-      } catch (error) {}
+function unwrapSafeLinks(u) {
+  try {
+    const url = new URL(u);
+    if (url.hostname.includes("safelinks.protection.outlook.com")) {
+      const inner = url.searchParams.get("url");
+      if (inner) return decodeURIComponent(inner);
     }
-  });
-
-  return pdfLinks;
+    return u;
+  } catch {
+    return u;
+  }
 }
 
 async function checkFillableForms(pdfUrls) {
@@ -214,7 +229,7 @@ async function fetchPdf(url, index) {
     const daysSinceLastMod = parseInt(
       (new Date() - new Date(modDate)) / 1000 / 60 / 60 / 24
     );
-    const pdfUrlsFromObservePoint = await getPdfUrlsFromObservePoint(url);
+    const pdfUrlsFromObservePoint = [];
 
     return {
       url: url,
@@ -238,7 +253,7 @@ async function fetchPdf(url, index) {
     };
   } catch (error) {
     console.error(`Error fetching PDF ${index + 1}: ${url}`, error.message);
-    const pdfUrlsFromObservePoint = await getPdfUrlsFromObservePoint(url);
+    const pdfUrlsFromObservePoint = [];
     return {
       url: url,
       urlStatus: error.response ? error.response.status : "Error",
@@ -258,23 +273,6 @@ function dateParser(date) {
   let day = dateCleaned.substring(6, 8);
 
   return `${year}-${month}-${day}`;
-}
-
-async function getPdfUrlsFromObservePoint(pdfUrl) {
-  try {
-    let urls = exportResults
-      .filter((r) => r["LOG MESSAGE"].includes(pdfUrl))
-      .map((e) => {
-        return e["INITIAL PAGE URL"];
-      });
-    return urls;
-  } catch (error) {
-    console.error(
-      `Error fetching ObservePoint URLs for ${pdfUrl}:`,
-      error.message
-    );
-    return [];
-  }
 }
 
 async function main() {
